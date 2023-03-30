@@ -1,4 +1,4 @@
-const { Client, AccountId, PrivateKey, Hbar, TopicCreateTransaction, TopicMessageSubmitTransaction, TopicDeleteTransaction } = require("@hashgraph/sdk");
+const { Client, AccountId, PrivateKey, Hbar, TopicCreateTransaction, TopicMessageSubmitTransaction, TopicMessageQuery, TopicDeleteTransaction } = require("@hashgraph/sdk");
 
 require("dotenv").config();
 
@@ -16,35 +16,94 @@ async function main() {
     //setting the client for testNet by using myAccountId and myPrivateKey
     const client = Client.forTestnet().setOperator(myAccountId, myPrivateKey);
 
-    console.info("---------- CREATING NEW TOPIC ----------");
+    console.info("=================== CREATING PUBLIC TOPIC ===================")
+    // Create a new topic
+    let createTopicTxnResponse = await new TopicCreateTransaction().execute(client);
+
+    // Grab the newly generated topic ID
+    let createTopicTxnResponseReceipt = await createTopicTxnResponse.getReceipt(client);
+    let publicTopicId = createTopicTxnResponseReceipt.topicId;
+    console.log(`Public topic ID is: ${publicTopicId}`);
+
+    // Wait 5 seconds between consensus topic creation and subscription creation
+    await new Promise((resolve) => setTimeout(resolve, 5000));
+
+    console.info("---------- SUBSCRIBING TO THE PUBLIC TOPIC ----------");
+    // Subscribe to the topic
+    new TopicMessageQuery()
+        .setTopicId(publicTopicId)
+        .subscribe(client, null, (message) => {
+            let messageAsString = Buffer.from(message.contents, "utf8").toString();
+            console.log(
+                `${message.consensusTimestamp.toDate()} Received: ${messageAsString}`
+            );
+        });
+
+    console.info("---------- SUBMITTING MESSAGE USING PUBLIC TOPIC ----------\n");
+    // Send message to the topic
+    let topicMsgSubmitTxn = await new TopicMessageSubmitTransaction({
+        topicId: publicTopicId,
+        message: "Hello from Public Topic, Abid!",
+    }).execute(client);
+
+    // Get the receipt of the transaction
+    const topicMsgSubmitTxnReceipt = await topicMsgSubmitTxn.getReceipt(client);
+
+    // Get the status of the transaction
+    const topicMsgSubmitTxnStatus = topicMsgSubmitTxnReceipt.status
+    console.log("The message transaction status " + topicMsgSubmitTxnStatus.toString());
+    await new Promise((resolve) => setTimeout(resolve, 5000));
+
+    console.info("=================== CREATING PRIVATE TOPIC ===================\n")
+    // Create a new topic
+    let pvtTopicCreateTxn = await new TopicCreateTransaction()
+        .setAdminKey(myPrivateKey)//as we are deleting this topic hence using setAdminKey otherwise setPublicKey(myPrivateKey.publicKey) can be used here
+        .execute(client);
+
+    // Grab the newly generated topic ID
+    let pvtTopicCreateTxnReceipt = await pvtTopicCreateTxn.getReceipt(client);
+    let pvtTopicId = pvtTopicCreateTxnReceipt.topicId;
+    console.log(`Private Topic ID is: ${pvtTopicId}`);
+
+    // Wait 5 seconds between consensus topic creation and subscription creation
+    await new Promise((resolve) => setTimeout(resolve, 5000));
+
+    console.info("---------- SUBSCRIBING TO THE PRIVATE TOPIC ----------");
+    // Subscribe to the topic
+    new TopicMessageQuery()
+        .setTopicId(pvtTopicId)
+        .subscribe(client, null, (message) => {
+            let messageAsString = Buffer.from(message.contents, "utf8").toString();
+            console.log(
+                `${message.consensusTimestamp.toDate()} Received: ${messageAsString}`
+            );
+        });
+
+    console.info("---------- SUBMITTING MESSAGE USING PRIVATE TOPIC ----------");
+    // Send message to private topic
+    let pvtTopicMsgSubmitTxn = await new TopicMessageSubmitTransaction({
+        topicId: pvtTopicId,
+        message: "Hello from Private Topic, Abid!",
+    })
+        .freezeWith(client)
+        .sign(myPrivateKey);
+
+    let pvtSubmitMsgTxSubmit = await pvtTopicMsgSubmitTxn.execute(client);
+
+    // Get the receipt of the transaction
+    let pvtGetReceipt = await pvtSubmitMsgTxSubmit.getReceipt(client);
+
+    // Get the status of the transaction
+    const pvtTransactionStatus = pvtGetReceipt.status;
+    console.log("The message transaction status " + pvtTransactionStatus.toString());
+
+    console.info("---------- DELETING PRIVATE TOPIC ----------");
     //Create the transaction
-    const topicCreateTxn = new TopicCreateTransaction()
-        .setAdminKey(myPrivateKey);
-    //Sign with the client operator private key and submit the transaction to a Hedera network
-    const topicCreateTxnResponse = await topicCreateTxn.execute(client);
-    //Request the receipt of the transaction
-    const topicCreateTxnResponseReceipt = await topicCreateTxnResponse.getReceipt(client);
-    //Get the topic ID
-    const newTopicId = topicCreateTxnResponseReceipt.topicId;
-    console.log("The new topic ID is " + newTopicId);
-
-
-    console.info("---------- SUBMITTING MESSAGE USING TOPIC ----------");
-    //Create the transaction
-    const topicMsgTxn = await new TopicMessageSubmitTransaction()
-        .setTopicId(newTopicId)
-        .setMessage("Hello from Abid! ");
-    //Get the transaction message
-    console.info("Message : " + topicMsgTxn.getMessage());
-
-
-    console.info("---------- DELETING TOPIC ----------");
-    //Create the transaction
-    const topicDeleteTxn = await new TopicDeleteTransaction()
-        .setTopicId(newTopicId)
+    const pvtTopicDeleteTxn = await new TopicDeleteTransaction()
+        .setTopicId(pvtTopicId)
         .freezeWith(client);
     //Sign the transaction with the admin key
-    const signTopicDeleteTxn = await topicDeleteTxn.sign(myPrivateKey);
+    const signTopicDeleteTxn = await pvtTopicDeleteTxn.sign(myPrivateKey);
     //Sign with the client operator private key and submit to a Hedera network
     const signTopicDeleteTxnResponse = await signTopicDeleteTxn.execute(client);
     //Request the receipt of the transaction
